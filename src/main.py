@@ -4,64 +4,79 @@ import numpy as np
 import torch
 import torchaudio
 from torchaudio.transforms import MuLawDecoding
+from typing import List, Dict, Any, Optional
 
-VOICE_TEMPERATURE = 0.5 # this is a random constant, change to better one
-SYSTEM_PROMPT = "You are an AI interviewer" # make prompt better
-JOB_INFO = ''
 
-def set_job_info(job_info: str):
-    JOB_INFO = job_info
+class VADProcessor:
+    def __init__(self, model_path: str = 'snakers4/silero-vad'):
+        self.model, self.utils = torch.hub.load(repo_or_dir=model_path, model='silero_vad', force_reload=True)
+        self.get_speech_timestamps, self.save_audio, self.read_audio, self.VADIterator, self.collect_chunks = self.utils
+        self.mu_law_decoder = MuLawDecoding()
 
-vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                              model='silero_vad', force_reload=True)
-(get_speech_timestamps,
- save_audio,
- read_audio,
- VADIterator,
- collect_chunks) = utils
+    def get_vad_probabilities(self, audio_bytes: bytes) -> List[float]:
+        audio_tensor = torch.tensor(np.frombuffer(audio_bytes, dtype=np.uint8), dtype=torch.float32)
+        pcm_audio = self.mu_law_decoder(audio_tensor)
+        chunks = torch.split(pcm_audio, 80)  # 10 ms chunks (80 samples at 8 kHz)
+        probabilities = [self.model(chunk.unsqueeze(0)).item() for chunk in chunks]
+        return probabilities
 
-mu_law_decoder = MuLawDecoding()
+    def is_voice(self, probabilities: List[float], threshold: float = 0.5) -> bool:
+        return sum(probabilities) / len(probabilities) > threshold
 
-def get_vad_probabilities(audio_bytes):
-    audio_tensor = torch.tensor(np.frombuffer(audio_bytes, dtype=np.uint8), dtype=torch.float32)
-    pcm_audio = mu_law_decoder(audio_tensor)
-    chunks = torch.split(audio_tensor, 80)  # Process in 10 ms chunks (80 samples at 8 kHz)
-    probabilities = [vad_model(chunk.unsqueeze(0)) for chunk in chunks]
-    return probabilities
 
-def is_voice(probabilities):
-    return sum(probabilities) / len(probabilities) > 0.5 # potentially better algo exists
+class AudioHandler:
+    def __init__(self, vad_processor: VADProcessor):
+        self.vad_processor = vad_processor
 
-# WebSocket server to receive audio packets from Twilio
-async def audio_stream_handler(websocket, path):
-    print("Client connected")
-    try:
-        async for message in websocket:
-            if is_voice(get_vad_probabilities(message)):
-                return {"status": "voice_detected", "data": message}
-            
-            return {"status": "no_voice", "data": None}
-            
-    except websockets.exceptions.ConnectionClosed:
-        print("Client disconnected")
-    except Exception as e:
-        print(f"Error: {e}")
+    def process_audio(self, audio_bytes: bytes) -> Dict[str, Any]:
+        probabilities = self.vad_processor.get_vad_probabilities(audio_bytes)
+        if self.vad_processor.is_voice(probabilities):
+            return {"status": "voice_detected", "data": audio_bytes}
+        return {"status": "no_voice", "data": None}
 
-def voice_to_text(audio_bytes):
-    pass
 
-def get_llm_response(text):
-    pass
+class Response:
+    def __init__(self, system_prompt: str):
+        self.system_prompt = system_prompt
 
-def text_to_voice(text):
-    pass
+    def get_llm_response(self, text: str) -> str:
+        # Placeholder for LLM call
+        return f"LLM Response to: {text}"
+    
+    def text_to_voice(self, text: str) -> bytes:
+        # Placeholder for TTS implementation
+        return b"audio_bytes"
 
-def send_audio(audio_bytes):
-    pass
 
-start_server = websockets.serve(audio_stream_handler, "0.0.0.0", 8765)
+class WebSocketServer:
+    def __init__(self, host: str, port: int, audio_handler: AudioHandler):
+        self.host = host
+        self.port = port
+        self.audio_handler = audio_handler
+
+    async def audio_stream_handler(self, websocket, path):
+        print("Client connected")
+        try:
+            async for message in websocket:
+                response = self.audio_handler.process_audio(message)
+                await websocket.send(str(response))
+        except websockets.exceptions.ConnectionClosed:
+            print("Client disconnected")
+        except Exception as e:
+            print(f"Error: {e}")
+
+    def start(self):
+        print(f"WebSocket server listening on ws://{self.host}:{self.port}")
+        start_server = websockets.serve(self.audio_stream_handler, self.host, self.port)
+        asyncio.get_event_loop().run_until_complete(start_server)
+        asyncio.get_event_loop().run_forever()
+
 
 if __name__ == "__main__":
-    print("WebSocket server listening on ws://0.0.0.0:8765")
-    asyncio.get_event_loop().run_until_complete(start_server)
-    asyncio.get_event_loop().run_forever()
+    # Initialize components
+    vad_processor = VADProcessor()
+    audio_handler = AudioHandler(vad_processor=vad_processor)
+    websocket_server = WebSocketServer(host="0.0.0.0", port=8765, audio_handler=audio_handler)
+
+    # Start the server
+    websocket_server.start()
