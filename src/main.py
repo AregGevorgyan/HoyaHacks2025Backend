@@ -33,11 +33,20 @@ class AudioHandler:
         if self.vad_processor.is_voice(probabilities):
             return {"status": "voice_detected", "data": audio_bytes}
         return {"status": "no_voice", "data": None}
+    
+class SpeechToText:
+    def __init__(self):
+        pass
+
+    def transcribe(self, audio_bytes: bytes) -> str:
+        return 'placeholder text'
 
 
 class Response:
-    def __init__(self, system_prompt: str):
-        self.system_prompt = system_prompt
+    SYSTEM_PROMPT = "You are an AI candidate screener to help recuiters" # make better
+
+    def __init__(self, job_info: str):
+        self.prompt = Response.SYSTEM_PROMPT + job_info
 
     def get_llm_response(self, text: str) -> str:
         # Placeholder for LLM call
@@ -59,7 +68,13 @@ class WebSocketServer:
         try:
             async for message in websocket:
                 response = self.audio_handler.process_audio(message)
-                await websocket.send(str(response))
+                if response["status"] == "voice_detected":
+                    stt = SpeechToText()
+                    text = stt.transcribe(response["data"])
+                    response_text = Response(system_prompt="Placeholder system prompt")
+                    llm_response = response_text.get_llm_response(text)
+                    audio_bytes = response_text.text_to_voice(llm_response)
+                    await websocket.send(audio_bytes)
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
         except Exception as e:
