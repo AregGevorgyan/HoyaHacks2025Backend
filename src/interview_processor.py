@@ -13,15 +13,21 @@ import numpy as np
 import torch
 import torchaudio
 from torchaudio.transforms import MuLawDecoding
-from google.cloud import speech # TODO figure out where api key for this goes
+from google.cloud import speech
 from groq import Groq
 from elevenlabs import generate, set_api_key
 
-def load_config():
-    with open("config.json", "r") as f:
-        config = json.load(f)
+def load_config() -> Dict[str, Any]:
+    config_path = "config.json"
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
         for key, value in config.items():
             os.environ[key] = value
+        return config
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        sys.exit(1)
 
 class VADProcessor:
     def __init__(self, sample_rate: int = 8000):
@@ -31,15 +37,16 @@ class VADProcessor:
             model='silero_vad',
             force_reload=True,
             force_sample_rate=sample_rate
-        )
+        )# TODO fix splitting sizes
         self.mu_law_decoder = MuLawDecoding()
         self.voice_threshold = 0.5
         self.chunk_size = int(0.03 * sample_rate)  # 30ms chunks
+        self.voice_history = deque(maxlen=80)
 
     def get_vad_probabilities(self, audio_bytes: bytes) -> List[float]:
-        audio_tensor = torch.tensor(np.frombuffer(audio_bytes, dtype=np.uint8), dtype=torch.float32)
+        audio_tensor = torch.tensor(np.frombuffer(audio_bytes, dtype=np.uint8), dtype=torch.uint8)
         pcm_audio = self.mu_law_decoder(audio_tensor)
-        chunks = torch.split(pcm_audio, 80)
+        chunks = torch.split(pcm_audio, int(0.03 * sample_rate))
         probabilities = []
         batch_size = 16
         for i in range(0, len(chunks), batch_size):
@@ -47,7 +54,7 @@ class VADProcessor:
             batch_probs = self.model(batch).tolist()
             probabilities.extend(batch_probs)
         return probabilities
-
+# TODO switch awawy from using average to sliding window
     def is_voice(self, probabilities: List[float], threshold: float = None) -> bool:
         if threshold is None:
             threshold = self.voice_threshold
@@ -66,20 +73,20 @@ class AudioHandler:
             return {"status": "voice_detected", "data": audio_bytes}
         return {"status": "no_voice", "data": None}
     
-class SpeechToText:
+class SpeechToText: # TODO put this on a seperate thread, async wrap
     def __init__(self):
         self.client = speech.SpeechClient()
         self.text_buffer = []
         self.streaming_config = speech.StreamingRecognitionConfig(
             config=speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                sample_rate_hertz=16000,# TODO make sure these settings are correct (prolly not)
+                encoding=speech.RecognitionConfig.AudioEncoding.MULAW,
+                sample_rate_hertz=8000,
                 language_code="en-US",
                 enable_automatic_punctuation=True,
             ),
             interim_results=True,
-        )
-        self.streaming_queue = queue.Queue()
+        )# TODO wrap syncronous queue in asyncronous queue
+        self.streaming_queue = asyncio.Queue()
         
     def _create_stream(self):
         while True:
@@ -122,14 +129,13 @@ class SpeechToText:
 
 
 class Response:
-    # TODO promp engineering
-    SYSTEM_PROMPT = "You are an AI candidate screener to help recruiters. Ask the candidate questions for a short interview to see if they are qualified for the following job description"
+    SYSTEM_PROMPT = "You are an AI recuiting assistent that screens candidates on a phone interview. Ask the candidate questions for a short interview (approx 30 min) to see if they are qualified for the following job description based on the criteria in a more behavioral way."
 
     def __init__(self, job_info: str):
         self.prompt = Response.SYSTEM_PROMPT + job_info# TODO add transcript to this
-        self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
         self.conversation_history = []
-        set_api_key(os.getenv("ELEVENLABS_API_KEY")) # TODO make 11labs import correctly
+        set_api_key(os.environ.get("ELEVENLABS_API_KEY"))
 
     async def get_llm_response(self, text: str) -> str:
         try:
@@ -142,12 +148,10 @@ class Response:
                 *self.conversation_history
             ]
 
-            # TODO change settings!!!!
             completion = self.groq_client.chat.completions.create(
-                model="mixtral-8x7b-32768",
+                model="llama-3.3-70b-versatile",
                 messages=messages,
-                temperature=0.7,
-                max_tokens=4096,
+                temperature=0.5,
                 top_p=1,
                 stream=False
             )
@@ -163,10 +167,9 @@ class Response:
 
     async def text_to_voice(self, text: str) -> bytes:
         try:
-            # TODO better voice
             audio = generate(
                 text=text,
-                voice="Josh", 
+                voice="Bella", 
                 model="eleven_monolingual_v1"
             )
             return audio
@@ -208,7 +211,7 @@ class WebSocketServer:
 
     async def close_connection_after_delay(self, websocket, delay_minutes):
         """User can't talk with ai for more than 30 minutes"""
-        await asyncio.sleep(delay_minutes * 60)  # Convert minutes to seconds
+        await asyncio.sleep(delay_minutes * 60)
         await websocket.close()
         print(f"Connection closed after {delay_minutes} minutes.")
 
@@ -220,7 +223,7 @@ class WebSocketServer:
 
 
 if __name__ == "__main__":
-    load_config()
+    CONFIG = load_config()
     # Initialize components
     vad_processor = VADProcessor()
     audio_handler = AudioHandler(vad_processor=vad_processor)
