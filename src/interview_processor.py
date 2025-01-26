@@ -30,37 +30,70 @@ def load_config() -> Dict[str, Any]:
         sys.exit(1)
 
 class VADProcessor:
-    def __init__(self, sample_rate: int = 8000):
+    def __init__(self, sample_rate: int = 8000, window_duration: float = 0.3, activation_ratio: float = 0.7):
         self.sample_rate = sample_rate
         self.model, self.utils = torch.hub.load(
             repo_or_dir='snakers4/silero-vad',
             model='silero_vad',
             force_reload=True,
             force_sample_rate=sample_rate
-        )# TODO fix splitting sizes
+        )
         self.mu_law_decoder = MuLawDecoding()
         self.voice_threshold = 0.5
         self.chunk_size = int(0.03 * sample_rate)  # 30ms chunks
-        self.voice_history = deque(maxlen=80)
+        self.activation_ratio = activation_ratio
+        
+        # Calculate window size in chunks (e.g., 0.3s = 10 chunks of 30ms)
+        window_size = int(window_duration / 0.03)
+        self.voice_history = deque(maxlen=window_size)
 
     def get_vad_probabilities(self, audio_bytes: bytes) -> List[float]:
+        # Convert bytes to uint8 tensor
         audio_tensor = torch.tensor(np.frombuffer(audio_bytes, dtype=np.uint8), dtype=torch.uint8)
+        
+        # Decode mu-law encoded audio
         pcm_audio = self.mu_law_decoder(audio_tensor)
-        chunks = torch.split(pcm_audio, int(0.03 * sample_rate))
+        
+        # Split into 30ms chunks using instance variable
+        chunks = torch.split(pcm_audio, self.chunk_size)
+        
+        # Handle case where last chunk might be smaller than chunk_size
+        chunks = [chunk for chunk in chunks if chunk.shape[0] == self.chunk_size]
+        
+        if not chunks:
+            return []
+
+        # Process in batches for efficiency
         probabilities = []
         batch_size = 16
         for i in range(0, len(chunks), batch_size):
-            batch = torch.stack([chunk for chunk in chunks[i:i+batch_size]])
+            batch = torch.stack(chunks[i:i+batch_size])
             batch_probs = self.model(batch).tolist()
             probabilities.extend(batch_probs)
+            
         return probabilities
-# TODO switch awawy from using average to sliding window
+
     def is_voice(self, probabilities: List[float], threshold: float = None) -> bool:
+        """
+        Uses sliding window detection with the following logic:
+        - At least X% of chunks in the window must be above threshold
+        - Returns True when voice is detected in the current window
+        """
         if threshold is None:
             threshold = self.voice_threshold
-        is_voice_detected = sum(probabilities) / len(probabilities) > threshold
-        self.voice_history.append(is_voice_detected)
-        return is_voice_detected
+            
+        # Add current probabilities to history
+        self.voice_history.extend(probabilities)
+        
+        # Need at least 70% of window filled to make decision
+        if len(self.voice_history) < 0.7 * self.voice_history.maxlen:
+            return False
+        
+        # Calculate ratio of chunks above threshold in the window
+        above_threshold = sum(1 for p in self.voice_history if p > threshold)
+        detection_ratio = above_threshold / len(self.voice_history)
+        
+        return detection_ratio >= self.activation_ratio
 
 
 class AudioHandler:
