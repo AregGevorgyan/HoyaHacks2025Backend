@@ -22,7 +22,7 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = require("twilio")(accountSid, authToken);
 
 class Call {
-    constructor(callSid, phoneNumber, uuid, criteria,applicant) {
+    constructor(callSid, phoneNumber, uuid, criteria,applicant, jobListing) {
         this.uuid = uuid
         this.criteria
         this.callSid = callSid;
@@ -42,6 +42,7 @@ class Call {
         this.interval;
         this.resetAudio;
         this.criteria = criteria
+        this.jobListing = jobListing
         this.applicant = applicant
         setTimeout(() => {
             this.hangup();
@@ -412,7 +413,9 @@ class Call {
                 
                 const prompt = `
                         You are an interviewer named Jack. You are in a phone call, calling a candidate that signed up for a job that you are the recruiter for.
-                        Before asking any questions about the job, establish rapport by asking about their day and such. Here's the criteria that you are quizzing for.
+                        Before asking any questions about the job, establish rapport by asking about their day and such. They are applying for a job titled: ${this.jobListing} 
+                        
+                        Here's the criteria that you are quizzing for.
 
                         Criteria: ${this.criteria}
 

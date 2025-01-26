@@ -610,7 +610,7 @@ function callApplicants(applicants, criteria, jobListing,uuid) {
 
     return new Promise(async(resolve) => {
         await applicants.forEach((applicant) => {
-            const phoneNumber = cmod.decrypt(applicant.phoneNumber)
+            const phoneNumber = cmod.decrypt(applicant.phone)
             const fileOfApplicant = {
                 name: cmod.decrypt(applicant.name),
                 previousWork: cmod.decrypt(applicant.role),
@@ -630,9 +630,6 @@ function callApplicants(applicants, criteria, jobListing,uuid) {
             dynamicCalls[call.sid] = new Call(
                 call.sid,
                 phoneNumber,
-                agentAction,
-                agentArea,
-                agentName,
                 uuid,
                 criteria,
                 fileOfApplicant,
@@ -693,8 +690,9 @@ app.post("/sendCalls", (req,res) => {
 
 
                                     if (campaign) {
+                                        const applicants = campaign.applicants
 
-                                        callApplicants(applicants, cmod.decrypt(campaign.criteria), cmod.decrypt(campaign.jobListing), user.uuid).then(() => {
+                                        callApplicants(applicants,campaign.criteria, cmod.decrypt(campaign.jobListing), user.uuid).then(() => {
                                             res.status(200).send(JSON.stringify({
                                                 code: "ok",
                                                 message: "success"
