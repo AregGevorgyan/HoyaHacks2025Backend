@@ -606,7 +606,7 @@ wss.on("connection", function (ws) {
         }
     });
 });
-function callApplicants(applicants, criteria, jobListing,uuid) {
+function callApplicants(applicants, criteria, jobListing,uuid, campaignId) {
 
     return new Promise(async(resolve) => {
         await applicants.forEach((applicant) => {
@@ -627,6 +627,26 @@ function callApplicants(applicants, criteria, jobListing,uuid) {
             from: `+12403660377`,
         })
         .then((call) => {
+            let interval = setInterval(() => {
+                const allCalls =Object.values(dynamicCalls);
+                const normalCalls = [];
+                let callCompleteBool = true;
+                allCalls.map((call,i) => {
+                    normalCalls.push(applicant[i]);
+                    if (call.callComplete) {
+                        callComplete = false
+                        normalCalls.push({...applicant[i], compatibilityScore: call.convoSummary, transcript: call.transcript});
+                    }
+                
+                })
+                if (!callCompleteBool) {
+                    User.findOneAndUpdate({id: campaignId}, {applicants: normalCalls}).then(() => {
+                        
+                    })
+                }
+
+                
+            },30000)
             dynamicCalls[call.sid] = new Call(
                 call.sid,
                 phoneNumber,
@@ -692,7 +712,7 @@ app.post("/sendCalls", (req,res) => {
                                     if (campaign) {
                                         const applicants = campaign.applicants
 
-                                        callApplicants(applicants,campaign.criteria, cmod.decrypt(campaign.jobListing), user.uuid).then(() => {
+                                        callApplicants(applicants,campaign.criteria, cmod.decrypt(campaign.jobListing), user.uuid, campaignId).then(() => {
                                             res.status(200).send(JSON.stringify({
                                                 code: "ok",
                                                 message: "success"

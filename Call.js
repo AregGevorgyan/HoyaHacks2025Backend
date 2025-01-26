@@ -31,6 +31,7 @@ class Call {
         this.data = [];
         this.rating = 0;
         this.markMessage = "";
+        this.callComplete = false;
         this.phoneNumber = phoneNumber;
         this.streamSid = "";
         this.aiTalking = false;
@@ -128,8 +129,6 @@ class Call {
             return
         } else {
 
-            if (this.rating > 75) {
-                this.isLead = true;
     
                 
     
@@ -139,10 +138,15 @@ class Call {
                     readableTranscript +=
                         message.sender + ": " + message.message + "\n\n";
                 });
+                console.log(readableTranscript)
                 const prompt = `Attached to this text is the transcript of a whole phone call converesation. You will be given the criteria of a job. I want you to generate a score from 0-100, 0 meaning the person isn't a good candidate at all for the position and 100 meaning that the candidate is a perfect match.
                 Here's the criteria you want to base it off of: ${this.criteria}
                 
                 Here's the full transcript of the conversation so you can base it off of: ${readableTranscript}
+
+                Your response should only be a number.
+
+                for example: 89
                 `
     
                 const result = await model.generateContent(prompt);
@@ -150,15 +154,9 @@ class Call {
                 
                 this.convoSummary = aiSummary;
                 console.log("AI summary", aiSummary);
+                this.callComplete = true
     
-             
-            } else {
-                client.calls(this.callSid).update({ status: "completed" });
-            }
-
-
-
-
+           
 
 
 
