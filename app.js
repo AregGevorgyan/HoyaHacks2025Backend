@@ -547,6 +547,8 @@ function processCsv(plainText) {
 
 }
 
+const dynamicCalls = {};
+
 const wss = new WebSocket.Server({ server: server });
 
 
@@ -740,6 +742,8 @@ app.post("/sendCalls", (req,res) => {
     
 
 })
+
+
 
 app.post("/xml", (req,res) => {
     console.log("xml called");
