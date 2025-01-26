@@ -631,12 +631,13 @@ function callApplicants(applicants, criteria, jobListing,uuid, campaignId) {
             let interval = setInterval(() => {
                 console.log("this ran")
                 const allCalls =Object.values(dynamicCalls);
-                const applicants = applicants
                 let callCompleteBool = true;
                 allCalls.map((call,i) => {
                     // normalCalls.push(applicant[i]);
                     console.log(call)
                     if (call.callComplete) {
+                        console.log("updating variables")
+                        callCompleteBool = false;
                         globalApps[i].compatibilityScore = call.convoSummary;
                         globalApps[i].transcript = call.transcript
                         // callCompleteBool = false
@@ -645,7 +646,7 @@ function callApplicants(applicants, criteria, jobListing,uuid, campaignId) {
                 
                 })
                 if (!callCompleteBool) {
-                    User.findOneAndUpdate({id: campaignId}, {applicants: globalApps}).then(() => {
+                    Campaign.findOneAndUpdate({id: campaignId}, {applicants: globalApps}).then(() => {
                         console.log("updated the applicant")
                     })
                 }

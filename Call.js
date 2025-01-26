@@ -594,7 +594,7 @@ class Call {
     async generateAudio(response) {
         return new Promise(async (resolve) => {
             const url =
-                "https://api.elevenlabs.io/v1/text-to-speech/03vEurziQfq3V8WZhQvn?optimize_streaming_latency=4&output_format=ulaw_8000";
+                "https://api.elevenlabs.io/v1/text-to-speech/UgBBYS2sOqTuMpoF3BR0?optimize_streaming_latency=4&output_format=ulaw_8000";
             let textNeeded = response.response;
             console.log("heres the audio that is being generated", textNeeded);
             const body = {
