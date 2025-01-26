@@ -12,16 +12,20 @@ const session = require("express-session");
 const MemoryStore = require('memorystore')(session)
 const fs = require("fs")
 const csv = require('csv-parser')
+const Call = require("./Call.js");
 const https = require("https")
 const WebSocket = require("ws");
-const { equal } = require('assert');
+
+
 
 
 const saltRounds = 10;
 
 
 
-
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+const client = require("twilio")(accountSid, authToken);
 
 const app = express();
 
@@ -96,6 +100,17 @@ if (process.env.NODE_ENV === "DEV") {
         credentials: true
     }))
 } else {
+
+    options = {
+        key: fs.readFileSync("/etc/letsencrypt/live/api.hicruit.us/privkey.pem"),
+        cert: fs.readFileSync("/etc/letsencrypt/live/api.hicruit.us/fullchain.pem")
+    }
+
+    app.use(cors({
+        origin: "https://hicruit.us",
+        methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+        credentials: true
+    }))
     // PROD credentials.
 }
 
@@ -137,6 +152,11 @@ const userSchema = new mongoose.Schema({
 
 
 const campaignSchema = new mongoose.Schema({
+    id: {
+        type: String,
+        unique: true,
+        index: true,
+    },
     uuid: {
         type: String,
         index: true
@@ -403,6 +423,7 @@ app.get("/getUser", (req,res) => {
                                         jobListing: cmod.decrypt(listing.jobListing),
                                         numberOfApplicants: listing.numberOfApplicants,
                                         uuid: user.uuid,
+                                        id: listing.id,
                                     }
 
                                     const allApplicants = []
@@ -526,6 +547,204 @@ function processCsv(plainText) {
 
 }
 
+const wss = new WebSocket.Server({ server: server });
+
+
+
+wss.on("connection", function (ws) {
+    // technically anyone could just connect and then we r fucked so we need to figure out a better way to do this in the future. For testing is fine though.
+    twilioWs = ws;
+
+    console.log("Just connected");
+
+    ws.on("close", () => {
+        console.log("The connection was closed and interval was cleared");
+        
+    });
+
+    ws.on("message", (message) => {
+        try {
+            let parsedMsg = JSON.parse(message.toString());
+            streamId = parsedMsg.streamSid;
+
+            if (parsedMsg.event === "start") {
+                const callSid = parsedMsg["start"]["callSid"];
+                // Ensure the callSid exists in dynamicCalls
+
+                // dynamicCalls[callSid].setWebsocket(ws);
+
+                // Renaming the class instance key from callSid to streamId
+                dynamicCalls[streamId] = dynamicCalls[callSid];
+                dynamicCalls[streamId].streamSid = streamId;
+                delete dynamicCalls[callSid];
+
+                dynamicCalls[streamId].startInterval();
+                dynamicCalls[streamId].setWebsocket(ws);
+            } else if (parsedMsg.event === "stop") {
+                console.log("The call has ended");
+                dynamicCalls[streamId].stopProcessing();
+            } else if (
+                parsedMsg.event === "media" &&
+                parsedMsg.media &&
+                parsedMsg.media.track === "inbound"
+            ) {
+                if (parsedMsg.media.payload !== undefined) {
+                    if (!dynamicCalls[streamId].aiTalking) {
+                        dynamicCalls[streamId].addData(
+                            parsedMsg.sequenceNumber,
+                            parsedMsg.media.payload,
+                        );
+                    } else {
+                        dynamicCalls[streamId].resetData();
+                    }
+                }
+            }
+        } catch (e) {
+            console.log("Error parsing message:", e);
+        }
+    });
+});
+function callApplicants(applicants, criteria, jobListing,uuid) {
+
+    return new Promise(async(resolve) => {
+        await applicants.forEach((applicant) => {
+            const phoneNumber = cmod.decrypt(applicant.phoneNumber)
+            const fileOfApplicant = {
+                name: cmod.decrypt(applicant.name),
+                previousWork: cmod.decrypt(applicant.role),
+                experience: cmod.encrypt(applicant.experience),
+                skills: applicant.skills
+                
+    
+            }
+            
+        client.calls
+        .create({
+            url: "https://api.hicruit.us/xml",
+            to: `+1${phoneNumber}`,
+            from: `+12403660377`,
+        })
+        .then((call) => {
+            dynamicCalls[call.sid] = new Call(
+                call.sid,
+                phoneNumber,
+                agentAction,
+                agentArea,
+                agentName,
+                uuid,
+                criteria,
+                fileOfApplicant,
+                jobListing
+            );
+            // globalSid = call.sid;
+    
+            console.log(call);
+          
+        });
+    
+    
+        })
+
+        resolve(true)
+
+    })
+
+   
+
+
+
+
+}
+
+
+
+
+app.post("/sendCalls", (req,res) => {
+    authenticateUser(req).then((id) => {
+        if (id === "No user found") {
+            res.status(500).send(JSON.stringify({
+                code: "err",
+                message: "invalid request"
+            }))
+        } else {
+            User.findOne({uuid: id}).then((user,err) => {
+                if (err) {
+                    console.log(err)
+                    res.status(400).send(JSON.stringify({
+                        code: "err",
+                        message: "invalid request"
+                    }))
+                } else {
+                    if (user) {
+
+                        try {
+                            const {campaignId} = req.body;
+
+                            Campaign.findOne({id: campaignId}).then(async(campaign,err) => {
+                                if (err) {
+                                    console.log(err);
+                                    res.status(500).send(JSON.stringify({
+                                        code: "err",
+                                        message: "invalid request"
+                                    }))
+                                } else {
+
+
+                                    if (campaign) {
+
+                                        callApplicants(applicants, cmod.decrypt(campaign.criteria), cmod.decrypt(campaign.jobListing), user.uuid).then(() => {
+                                            res.status(200).send(JSON.stringify({
+                                                code: "ok",
+                                                message: "success"
+                                            }))
+                                        })
+                                    
+                                    }
+
+
+
+
+                                }
+                            })
+
+
+
+                            
+                        } catch(e) {
+                            console.log(e)
+                            res.status(400).send(JSON.stringify({
+                                code: "err",
+                                message: "invalid request"
+                            }))
+                        }
+
+
+
+
+                    } else {
+                        res.status(400).send(JSON.stringify({
+                            code: "err",
+                            message: "invalid request"
+                        }))
+                    }
+                }
+            })
+            
+
+        
+
+
+        }
+    })
+    
+    
+
+})
+
+app.post("/xml", (req,res) => {
+    console.log("xml called");
+    res.sendFile(__dirname + "/call.xml");
+})
 
 app.post("/uploadListing", async(req,res) => {
 
@@ -575,7 +794,7 @@ app.post("/uploadListing", async(req,res) => {
                         
 
                     const newCampaign = new Campaign({
-
+                        id: uuidv4(),
                         uuid: id,
                         jobListing: cmod.encrypt(positionName.toLowerCase()),
                         criteria: criteria,

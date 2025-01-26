@@ -9,6 +9,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/speech": "^6.7.0",
+    "@google/generative-ai": "^0.21.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "cryptr": "^6.3.0",
@@ -20,7 +22,10 @@
     "memorystore": "^1.6.7",
     "mongoose": "^8.9.5",
     "nodemailer": "^6.10.0",
+    "stream": "^0.0.3",
+    "twilio": "^5.4.2",
     "uuid": "^11.0.5",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "wss": "^3.3.4"
   }
 }
