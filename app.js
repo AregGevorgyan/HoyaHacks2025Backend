@@ -627,22 +627,25 @@ function callApplicants(applicants, criteria, jobListing,uuid, campaignId) {
             from: `+12403660377`,
         })
         .then((call) => {
+            let globalApps = applicants
             let interval = setInterval(() => {
                 console.log("this ran")
                 const allCalls =Object.values(dynamicCalls);
-                const normalCalls = [];
+                const applicants = applicants
                 let callCompleteBool = true;
                 allCalls.map((call,i) => {
-                    normalCalls.push(applicant[i]);
+                    // normalCalls.push(applicant[i]);
                     console.log(call)
                     if (call.callComplete) {
-                        callCompleteBool = false
-                        normalCalls.push({...applicant[i], compatibilityScore: call.convoSummary, transcript: call.transcript});
+                        globalApps[i].compatibilityScore = call.convoSummary;
+                        globalApps[i].transcript = call.transcript
+                        // callCompleteBool = false
+                        // normalCalls.push({...applicant[i], compatibilityScore: call.convoSummary, transcript: call.transcript});
                     }
                 
                 })
                 if (!callCompleteBool) {
-                    User.findOneAndUpdate({id: campaignId}, {applicants: normalCalls}).then(() => {
+                    User.findOneAndUpdate({id: campaignId}, {applicants: globalApps}).then(() => {
                         console.log("updated the applicant")
                     })
                 }
